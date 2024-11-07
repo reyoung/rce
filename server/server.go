@@ -3,10 +3,18 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
 	"github.com/reyoung/rce/process"
 	"github.com/reyoung/rce/protocol"
 	"log"
+	"os"
+	"os/exec"
+	"strings"
 	"sync"
+)
+
+var (
+	preSpawnCmd = os.Getenv("RCE_PRE_SPAWN_CMD")
 )
 
 type Server struct {
@@ -21,6 +29,17 @@ func forceClose(c chan struct{}) {
 		recover()
 	}()
 	close(c)
+}
+
+func runPreSpawnCmd(ctx context.Context) ([]byte, error) {
+	if preSpawnCmd == "" {
+		return nil, nil
+	}
+	parts := strings.Fields(preSpawnCmd)
+	head := parts[0]
+	parts = parts[1:]
+
+	return exec.CommandContext(ctx, head, parts...).Output()
 }
 
 type processSetter struct {
@@ -55,6 +74,13 @@ func (p *processSetter) Unset() {
 }
 
 func (s *Server) Spawn(svr protocol.RemoteCodeExecutor_SpawnServer) error {
+	out, e := runPreSpawnCmd(svr.Context())
+	if e != nil {
+		return errors.Join(e, fmt.Errorf("fail to run pre-spwan cmd '%s'", preSpawnCmd))
+	}
+	if out != nil {
+		log.Printf("Complete running pre-spawn command. output: %s", out)
+	}
 	p := process.New(svr.Context())
 	defer func() {
 		log.Printf("Closing process")
